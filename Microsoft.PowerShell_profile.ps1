@@ -1,7 +1,12 @@
+
 ### PowerShell Profile Refactor
 ### Version 1.03 - Refactored
 
 $debug = $false
+
+# Timing: Start
+$__profile_timing = @{}
+$__profile_timing["start"] = [datetime]::Now
 
 # Define the path to the file that stores the last execution time
 $timeFilePath = [Environment]::GetFolderPath("MyDocuments") + "\PowerShell\LastExecutionTime.txt"
@@ -38,15 +43,25 @@ if ($debug) {
 ############                                                                                                         ############
 #################################################################################################################################
 
+
 #opt-out of telemetry before doing anything, only if PowerShell is run as admin
+$__profile_timing["telemetry_start"] = [datetime]::Now
 if ([bool]([System.Security.Principal.WindowsIdentity]::GetCurrent()).IsSystem) {
     [System.Environment]::SetEnvironmentVariable('POWERSHELL_TELEMETRY_OPTOUT', 'true', [System.EnvironmentVariableTarget]::Machine)
 }
+$__profile_timing["telemetry_end"] = [datetime]::Now
 
-# Initial GitHub.com connectivity check with 1 second timeout
-$global:canConnectToGitHub = Test-Connection github.com -Count 1 -Quiet -TimeoutSeconds 1
+
+# GitHub connectivity check function (only when needed)
+function Test-GitHubConnection {
+    $__profile_timing["github_ping_start"] = [datetime]::Now
+    $result = Test-Connection github.com -Count 1 -Quiet -TimeoutSeconds 1
+    $__profile_timing["github_ping_end"] = [datetime]::Now
+    return $result
+}
 
 # Import Modules and External Profiles
+$__profile_timing["module_import_start"] = [datetime]::Now
 # Ensure Terminal-Icons module is installed before importing
 if (-not (Get-Module -ListAvailable -Name Terminal-Icons)) {
     Install-Module -Name Terminal-Icons -Scope CurrentUser -Force -SkipPublisherCheck
@@ -56,10 +71,17 @@ $ChocolateyProfile = "$env:ChocolateyInstall\helpers\chocolateyProfile.psm1"
 if (Test-Path($ChocolateyProfile)) {
     Import-Module "$ChocolateyProfile"
 }
+$__profile_timing["module_import_end"] = [datetime]::Now
+
 
 # Check for Profile Updates
 function Update-Profile {
+    $__profile_timing["update_profile_start"] = [datetime]::Now
     try {
+        if (-not (Test-GitHubConnection)) {
+            Write-Error "Cannot connect to github.com. Skipping profile update."
+            return
+        }
         $url = "https://raw.githubusercontent.com/ShardulJunagade/powershell-profile/shardul/Microsoft.PowerShell_profile.ps1"
         $oldhash = Get-FileHash $PROFILE
         Invoke-RestMethod $url -OutFile "$env:temp/Microsoft.PowerShell_profile.ps1"
@@ -74,10 +96,13 @@ function Update-Profile {
         Write-Error "Unable to check for `$profile updates: $_"
     } finally {
         Remove-Item "$env:temp/Microsoft.PowerShell_profile.ps1" -ErrorAction SilentlyContinue
+        $__profile_timing["update_profile_end"] = [datetime]::Now
     }
 }
 
+
 # Check if not in debug mode AND (updateInterval is -1 OR file doesn't exist OR time difference is greater than the update interval)
+$__profile_timing["profile_update_check_start"] = [datetime]::Now
 if (-not $debug -and `
     ($updateInterval -eq -1 -or `
       -not (Test-Path $timeFilePath) -or `
@@ -90,9 +115,14 @@ if (-not $debug -and `
 } elseif ($debug) {
     Write-Warning "Skipping profile update check in debug mode"
 }
+$__profile_timing["profile_update_check_end"] = [datetime]::Now
 
 function Update-PowerShell {
     try {
+        if (-not (Test-GitHubConnection)) {
+            Write-Error "Cannot connect to github.com. Skipping PowerShell update check."
+            return
+        }
         Write-Host "Checking for PowerShell updates..." -ForegroundColor Cyan
         $updateNeeded = $false
         $currentVersion = $PSVersionTable.PSVersion.ToString()
@@ -115,8 +145,10 @@ function Update-PowerShell {
     }
 }
 
+
 # skip in debug mode
 # Check if not in debug mode AND (updateInterval is -1 OR file doesn't exist OR time difference is greater than the update interval)
+$__profile_timing["pwsh_update_check_start"] = [datetime]::Now
 if (-not $debug -and `
     ($updateInterval -eq -1 -or `
      -not (Test-Path $timeFilePath) -or `
@@ -128,6 +160,7 @@ if (-not $debug -and `
 } elseif ($debug) {
     Write-Warning "Skipping PowerShell update in debug mode"
 }
+$__profile_timing["pwsh_update_check_end"] = [datetime]::Now
 
 function Clear-Cache {
     # add clear cache logic here
@@ -152,13 +185,16 @@ function Clear-Cache {
     Write-Host "Cache clearing completed." -ForegroundColor Green
 }
 
+
 # Admin Check and Prompt Customization
+$__profile_timing["admin_check_start"] = [datetime]::Now
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 function prompt {
     if ($isAdmin) { "[" + (Get-Location) + "] # " } else { "[" + (Get-Location) + "] $ " }
 }
 $adminSuffix = if ($isAdmin) { " [ADMIN]" } else { "" }
 $Host.UI.RawUI.WindowTitle = "PowerShell {0}$adminSuffix" -f $PSVersionTable.PSVersion.ToString()
+$__profile_timing["admin_check_end"] = [datetime]::Now
 
 # Utility Functions
 function Test-CommandExists {
@@ -167,7 +203,9 @@ function Test-CommandExists {
     return $exists
 }
 
+
 # Editor Configuration
+$__profile_timing["editor_config_start"] = [datetime]::Now
 $EDITOR = if (Test-CommandExists nvim) { 'nvim' }
           elseif (Test-CommandExists pvim) { 'pvim' }
           elseif (Test-CommandExists vim) { 'vim' }
@@ -177,12 +215,16 @@ $EDITOR = if (Test-CommandExists nvim) { 'nvim' }
           elseif (Test-CommandExists sublime_text) { 'sublime_text' }
           else { 'notepad' }
 Set-Alias -Name vim -Value $EDITOR
+$__profile_timing["editor_config_end"] = [datetime]::Now
+
 
 # Quick Access to Editing the Profile
+$__profile_timing["edit_profile_func_start"] = [datetime]::Now
 function Edit-Profile {
     vim $PROFILE.CurrentUserAllHosts
 }
 Set-Alias -Name ep -Value Edit-Profile
+$__profile_timing["edit_profile_func_end"] = [datetime]::Now
 
 function touch($file) { "" | Out-File $file -Encoding ASCII }
 function ff($name) {
@@ -196,12 +238,12 @@ function Get-PubIP { (Invoke-WebRequest http://ifconfig.me/ip).Content }
 
 # Open WinUtil full-release
 function winutil {
-	irm https://christitus.com/win | iex
+    irm https://christitus.com/win | iex
 }
 
 # Open WinUtil pre-release
 function winutildev {
-	irm https://christitus.com/windev | iex
+    irm https://christitus.com/windev | iex
 }
 
 # System Utilities
@@ -222,7 +264,7 @@ function uptime {
         # find date/time format
         $dateFormat = [System.Globalization.CultureInfo]::CurrentCulture.DateTimeFormat.ShortDatePattern
         $timeFormat = [System.Globalization.CultureInfo]::CurrentCulture.DateTimeFormat.LongTimePattern
-		
+        
         # check powershell version
         if ($PSVersionTable.PSVersion.Major -eq 5) {
             $lastBoot = (Get-WmiObject win32_operatingsystem).LastBootUpTime
@@ -285,7 +327,7 @@ function hb {
         $response = Invoke-RestMethod -Uri $uri -Method Post -Body $Content -ErrorAction Stop
         $hasteKey = $response.key
         $url = "http://bin.christitus.com/$hasteKey"
-	    Set-Clipboard $url
+        Set-Clipboard $url
         Write-Output "$url copied to clipboard."
     } catch {
         Write-Error "Failed to upload the document. Error: $_"
@@ -417,8 +459,8 @@ function sysinfo { Get-ComputerInfo }
 
 # Networking Utilities
 function flushdns {
-	Clear-DnsClientCache
-	Write-Host "DNS has been flushed"
+    Clear-DnsClientCache
+    Write-Host "DNS has been flushed"
 }
 
 # Clipboard Utilities
@@ -427,7 +469,9 @@ function cpy { Set-Clipboard $args[0] }
 function pst { Get-Clipboard }
 
 # Enhanced PowerShell Experience
+
 # Enhanced PSReadLine Configuration
+$__profile_timing["psreadline_start"] = [datetime]::Now
 $PSReadLineOptions = @{
     EditMode = 'Windows'
     HistoryNoDuplicates = $true
@@ -473,6 +517,7 @@ Set-PSReadLineOption -AddToHistoryHandler {
 # Improved prediction settings
 Set-PSReadLineOption -PredictionSource HistoryAndPlugin
 Set-PSReadLineOption -MaximumHistoryCount 10000
+$__profile_timing["psreadline_end"] = [datetime]::Now
 
 # Custom completion for common commands
 $scriptblock = {
@@ -501,8 +546,20 @@ $scriptblock = {
 }
 Register-ArgumentCompleter -Native -CommandName dotnet -ScriptBlock $scriptblock
 
-# oh-my-posh init pwsh --config https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/negligible.omp.json | Invoke-Expression
-oh-my-posh init pwsh --config "C:\Program Files (x86)\oh-my-posh\themes\negligible.omp.json" | Invoke-Expression
+
+# oh-my-posh and zoxide init
+$__profile_timing["posh_zoxide_start"] = [datetime]::Now
+# $ompTheme = "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/negligible.omp.json"
+$ompTheme = "C:\Program Files (x86)\oh-my-posh\themes\negligible.omp.json"
+if ($ompTheme -like 'https://*githubusercontent.com/*') {
+    if (-not (Test-GitHubConnection)) {
+        Write-Error "Cannot connect to github.com. Skipping oh-my-posh theme load."
+    } else {
+        oh-my-posh init pwsh --config $ompTheme | Invoke-Expression
+    }
+} else {
+    oh-my-posh init pwsh --config $ompTheme | Invoke-Expression
+}
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
     Invoke-Expression (& { (zoxide init --cmd cd powershell | Out-String) })
 } else {
@@ -515,6 +572,7 @@ if (Get-Command zoxide -ErrorAction SilentlyContinue) {
         Write-Error "Failed to install zoxide. Error: $_"
     }
 }
+$__profile_timing["posh_zoxide_end"] = [datetime]::Now
 
 # Help Function
 function Show-Help {
@@ -609,8 +667,58 @@ Use '$($PSStyle.Foreground.Magenta)Show-Help$($PSStyle.Reset)' to display this h
     Write-Host $helpText
 }
 
+
+$__profile_timing["custom_script_start"] = [datetime]::Now
 if (Test-Path "$PSScriptRoot\CTTcustom.ps1") {
     Invoke-Expression -Command "& `"$PSScriptRoot\CTTcustom.ps1`""
+}
+$__profile_timing["custom_script_end"] = [datetime]::Now
+
+
+# Function to print timing summary
+
+function Show-ProfileTiming {
+    try {
+        $timing = $__profile_timing
+        $sections = @(
+            @{Name="Telemetry Opt-Out"; Start="telemetry_start"; End="telemetry_end"},
+            @{Name="Module Import"; Start="module_import_start"; End="module_import_end"},
+            @{Name="Profile Update Check"; Start="profile_update_check_start"; End="profile_update_check_end"},
+            @{Name="PowerShell Update Check"; Start="pwsh_update_check_start"; End="pwsh_update_check_end"},
+            @{Name="Admin Check"; Start="admin_check_start"; End="admin_check_end"},
+            @{Name="Editor Config"; Start="editor_config_start"; End="editor_config_end"},
+            @{Name="Edit-Profile Func"; Start="edit_profile_func_start"; End="edit_profile_func_end"},
+            @{Name="PSReadLine Config"; Start="psreadline_start"; End="psreadline_end"},
+            @{Name="oh-my-posh & zoxide"; Start="posh_zoxide_start"; End="posh_zoxide_end"},
+            @{Name="Custom Script"; Start="custom_script_start"; End="custom_script_end"}
+        )
+        # Only show GitHub Ping if present in timing
+        if ($timing.ContainsKey("github_ping_start") -and $timing.ContainsKey("github_ping_end")) {
+            $sections = @(@{Name="GitHub Ping"; Start="github_ping_start"; End="github_ping_end"}) + $sections
+        }
+        Write-Host "`n$($PSStyle.Foreground.Cyan)Profile Startup Timing (ms per section):$($PSStyle.Reset)"
+        $last = $timing["start"]
+        foreach ($section in $sections) {
+            if ($timing[$section.Start] -and $timing[$section.End]) {
+                $duration = ($timing[$section.End] - $timing[$section.Start]).TotalMilliseconds
+                Write-Host ("{0,-28}: {1,7:N0} ms" -f $section.Name, $duration)
+                $last = $timing[$section.End]
+            }
+        }
+        if ($timing["start"] -and $last) {
+            $total = ($last - $timing["start"]).TotalMilliseconds
+            Write-Host ("{0,-28}: {1,7:N0} ms" -f "Total Profile Time", $total)
+        }
+    } catch {
+        Write-Host "(timing error: $_)"
+    }
+}
+
+# Command to reload profile and print timing
+function reload-profile-timed {
+    Write-Host "Reloading PowerShell profile and displaying timing summary..." -ForegroundColor Cyan
+    . $PROFILE
+    Show-ProfileTiming
 }
 
 Write-Host "$($PSStyle.Foreground.Yellow)Use 'Show-Help' to display help$($PSStyle.Reset)"
