@@ -1,4 +1,3 @@
-
 ### PowerShell Profile Refactor
 ### Version 1.03 - Refactored
 
@@ -14,20 +13,6 @@ $timeFilePath = [Environment]::GetFolderPath("MyDocuments") + "\PowerShell\LastE
 # Define the update interval in days, set to -1 to always check
 $updateInterval = 7
 
-if ($debug) {
-    Write-Host "#######################################" -ForegroundColor Red
-    Write-Host "#           Debug mode enabled        #" -ForegroundColor Red
-    Write-Host "#          ONLY FOR DEVELOPMENT       #" -ForegroundColor Red
-    Write-Host "#                                     #" -ForegroundColor Red
-    Write-Host "#       IF YOU ARE NOT DEVELOPING     #" -ForegroundColor Red
-    Write-Host "#       JUST RUN \`Update-Profile\`   #" -ForegroundColor Red
-    Write-Host "#        to discard all changes       #" -ForegroundColor Red
-    Write-Host "#   and update to the latest profile  #" -ForegroundColor Red
-    Write-Host "#               version               #" -ForegroundColor Red
-    Write-Host "#######################################" -ForegroundColor Red
-}
-
-
 #################################################################################################################################
 ############                                                                                                         ############
 ############                                          !!!   WARNING:   !!!                                           ############
@@ -38,10 +23,88 @@ if ($debug) {
 ############                                                                                                         ############
 #!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!#
 ############                                                                                                         ############
-############                      IF YOU WANT TO MAKE CHANGES, USE THE Edit-Profile FUNCTION                         ############
-############                              AND SAVE YOUR CHANGES IN THE FILE CREATED.                                 ############
+############                      TO ADD YOUR OWN CODE OR IF YOU WANT TO OVERRIDE ANY OF THESE VARIABLES             ############
+############                      OR FUNCTIONS. USE THE Edit-Profile FUNCTION TO CREATE YOUR OWN profile.ps1 FILE.   ############
+############                      TO OVERRIDE IN YOUR NEW profile.ps1 FILE, REWRITE THE VARIABLE                     ############
+############                      OR FUNCTION, ADDING "_Override" TO THE NAME.                                       ############
 ############                                                                                                         ############
+############                      THE FOLLOWING VARIABLES RESPECT _Override:                                         ############
+############                      $EDITOR_Override                                                                   ############
+############                      $debug_Override                                                                    ############
+############                      $repo_root_Override  [To point to a fork, for example]                             ############
+############                      $timeFilePath_Override                                                             ############
+############                      $updateInterval_Override                                                           ############
+############                                                                                                         ############
+############                      THE FOLLOWING FUNCTIONS RESPECT _Override:                                         ############
+############                      Debug-Message_Override                                                             ############
+############                      Update-Profile_Override                                                            ############
+############                      Update-PowerShell_Override                                                         ############
+############                      Clear-Cache_Override                                                               ############
+############                      Get-Theme_Override                                                                 ############
+############                      WinUtilDev_Override [To call a fork, for example]                                  ############
+############                      Set-PredictionSource                                                               ############
 #################################################################################################################################
+
+### PowerShell Profile Refactor
+### Version 1.04 - Refactored
+
+if ($debug_Override){
+    # If variable debug_Override is defined in profile.ps1 file
+    # then use it instead
+    $debug = $debug_Override
+} else {
+    $debug = $false
+}
+
+# Define the path to the file that stores the last execution time
+if ($repo_root_Override){
+    # If variable $repo_root_Override is defined in profile.ps1 file
+    # then use it instead
+    $repo_root = $repo_root_Override
+} else {
+    $repo_root = "https://raw.githubusercontent.com/ChrisTitusTech"
+}
+
+# Define the path to the file that stores the last execution time
+if ($timeFilePath_Override){
+    # If variable $timeFilePath_Override is defined in profile.ps1 file
+    # then use it instead
+    $timeFilePath = $timeFilePath_Override
+} else {
+    $timeFilePath = "$env:USERPROFILE\Documents\PowerShell\LastExecutionTime.txt"
+}
+
+# Define the update interval in days, set to -1 to always check
+if ($updateInterval_Override){
+    # If variable $updateInterval_Override is defined in profile.ps1 file
+    # then use it instead
+    $updateInterval = $updateInterval_Override
+} else {
+    $updateInterval = 7
+}
+
+function Debug-Message{
+    # If function "Debug-Message_Override" is defined in profile.ps1 file
+    # then call it instead.
+    if (Get-Command -Name "Debug-Message_Override" -ErrorAction SilentlyContinue) {
+        Debug-Message_Override
+    } else {
+        Write-Host "#######################################" -ForegroundColor Red
+        Write-Host "#           Debug mode enabled        #" -ForegroundColor Red
+        Write-Host "#          ONLY FOR DEVELOPMENT       #" -ForegroundColor Red
+        Write-Host "#                                     #" -ForegroundColor Red
+        Write-Host "#       IF YOU ARE NOT DEVELOPING     #" -ForegroundColor Red
+        Write-Host "#       JUST RUN \`Update-Profile\`     #" -ForegroundColor Red
+        Write-Host "#        to discard all changes       #" -ForegroundColor Red
+        Write-Host "#   and update to the latest profile  #" -ForegroundColor Red
+        Write-Host "#               version               #" -ForegroundColor Red
+        Write-Host "#######################################" -ForegroundColor Red
+    }
+}
+
+if ($debug) {
+    Debug-Message
+}
 
 
 #opt-out of telemetry before doing anything, only if PowerShell is run as admin
@@ -51,14 +114,10 @@ if ([bool]([System.Security.Principal.WindowsIdentity]::GetCurrent()).IsSystem) 
 }
 $__profile_timing["telemetry_end"] = [datetime]::Now
 
-
-# GitHub connectivity check function (only when needed)
-function Test-GitHubConnection {
-    $__profile_timing["github_ping_start"] = [datetime]::Now
-    $result = Test-Connection github.com -Count 1 -Quiet -TimeoutSeconds 1
-    $__profile_timing["github_ping_end"] = [datetime]::Now
-    return $result
-}
+# Initial GitHub.com connectivity check with 1 second timeout
+$__profile_timing["github_check_start"] = [datetime]::Now
+$global:canConnectToGitHub = Test-Connection github.com -Count 1 -Quiet -TimeoutSeconds 1
+$__profile_timing["github_check_end"] = [datetime]::Now
 
 # Import Modules and External Profiles
 $__profile_timing["module_import_start"] = [datetime]::Now
@@ -76,30 +135,31 @@ $__profile_timing["module_import_end"] = [datetime]::Now
 
 # Check for Profile Updates
 function Update-Profile {
+    # If function "Update-Profile_Override" is defined in profile.ps1 file
+    # then call it instead.
     $__profile_timing["update_profile_start"] = [datetime]::Now
-    try {
-        if (-not (Test-GitHubConnection)) {
-            Write-Error "Cannot connect to github.com. Skipping profile update."
-            return
+    if (Get-Command -Name "Update-Profile_Override" -ErrorAction SilentlyContinue) {
+        Update-Profile_Override;
+    } else {
+        try {
+            $url = "$repo_root/powershell-profile/main/Microsoft.PowerShell_profile.ps1"
+            $oldhash = Get-FileHash $PROFILE
+            Invoke-RestMethod $url -OutFile "$env:temp/Microsoft.PowerShell_profile.ps1"
+            $newhash = Get-FileHash "$env:temp/Microsoft.PowerShell_profile.ps1"
+            if ($newhash.Hash -ne $oldhash.Hash) {
+                Copy-Item -Path "$env:temp/Microsoft.PowerShell_profile.ps1" -Destination $PROFILE -Force
+                Write-Host "Profile has been updated. Please restart your shell to reflect changes" -ForegroundColor Magenta
+            } else {
+                Write-Host "Profile is up to date." -ForegroundColor Green
+            }
+        } catch {
+            Write-Error "Unable to check for `$profile updates: $_"
+        } finally {
+            Remove-Item "$env:temp/Microsoft.PowerShell_profile.ps1" -ErrorAction SilentlyContinue
         }
-        $url = "https://raw.githubusercontent.com/ShardulJunagade/powershell-profile/shardul/Microsoft.PowerShell_profile.ps1"
-        $oldhash = Get-FileHash $PROFILE
-        Invoke-RestMethod $url -OutFile "$env:temp/Microsoft.PowerShell_profile.ps1"
-        $newhash = Get-FileHash "$env:temp/Microsoft.PowerShell_profile.ps1"
-        if ($newhash.Hash -ne $oldhash.Hash) {
-            Copy-Item -Path "$env:temp/Microsoft.PowerShell_profile.ps1" -Destination $PROFILE -Force
-            Write-Host "Profile has been updated. Please restart your shell to reflect changes" -ForegroundColor Magenta
-        } else {
-            Write-Host "Profile is up to date." -ForegroundColor Green
-        }
-    } catch {
-        Write-Error "Unable to check for `$profile updates: $_"
-    } finally {
-        Remove-Item "$env:temp/Microsoft.PowerShell_profile.ps1" -ErrorAction SilentlyContinue
-        $__profile_timing["update_profile_end"] = [datetime]::Now
     }
+    $__profile_timing["update_profile_end"] = [datetime]::Now
 }
-
 
 # Check if not in debug mode AND (updateInterval is -1 OR file doesn't exist OR time difference is greater than the update interval)
 $__profile_timing["profile_update_check_start"] = [datetime]::Now
@@ -118,33 +178,34 @@ if (-not $debug -and `
 $__profile_timing["profile_update_check_end"] = [datetime]::Now
 
 function Update-PowerShell {
-    try {
-        if (-not (Test-GitHubConnection)) {
-            Write-Error "Cannot connect to github.com. Skipping PowerShell update check."
-            return
-        }
-        Write-Host "Checking for PowerShell updates..." -ForegroundColor Cyan
-        $updateNeeded = $false
-        $currentVersion = $PSVersionTable.PSVersion.ToString()
-        $gitHubApiUrl = "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
-        $latestReleaseInfo = Invoke-RestMethod -Uri $gitHubApiUrl
-        $latestVersion = $latestReleaseInfo.tag_name.Trim('v')
-        if ($currentVersion -lt $latestVersion) {
-            $updateNeeded = $true
-        }
+    # If function "Update-PowerShell_Override" is defined in profile.ps1 file
+    # then call it instead.
+    if (Get-Command -Name "Update-PowerShell_Override" -ErrorAction SilentlyContinue) {
+        Update-PowerShell_Override;
+    } else {
+        try {
+            Write-Host "Checking for PowerShell updates..." -ForegroundColor Cyan
+            $updateNeeded = $false
+            $currentVersion = $PSVersionTable.PSVersion.ToString()
+            $gitHubApiUrl = "https://api.github.com/repos/PowerShell/PowerShell/releases/latest"
+            $latestReleaseInfo = Invoke-RestMethod -Uri $gitHubApiUrl
+            $latestVersion = $latestReleaseInfo.tag_name.Trim('v')
+            if ($currentVersion -lt $latestVersion) {
+                $updateNeeded = $true
+            }
 
-        if ($updateNeeded) {
-            Write-Host "Updating PowerShell..." -ForegroundColor Yellow
-            Start-Process powershell.exe -ArgumentList "-NoProfile -Command winget upgrade Microsoft.PowerShell --accept-source-agreements --accept-package-agreements" -Wait -NoNewWindow
-            Write-Host "PowerShell has been updated. Please restart your shell to reflect changes" -ForegroundColor Magenta
-        } else {
-            Write-Host "Your PowerShell is up to date." -ForegroundColor Green
+            if ($updateNeeded) {
+                Write-Host "Updating PowerShell..." -ForegroundColor Yellow
+                Start-Process powershell.exe -ArgumentList "-NoProfile -Command winget upgrade Microsoft.PowerShell --accept-source-agreements --accept-package-agreements" -Wait -NoNewWindow
+                Write-Host "PowerShell has been updated. Please restart your shell to reflect changes" -ForegroundColor Magenta
+            } else {
+                Write-Host "Your PowerShell is up to date." -ForegroundColor Green
+            }
+        } catch {
+            Write-Error "Failed to update PowerShell. Error: $_"
         }
-    } catch {
-        Write-Error "Failed to update PowerShell. Error: $_"
     }
 }
-
 
 # skip in debug mode
 # Check if not in debug mode AND (updateInterval is -1 OR file doesn't exist OR time difference is greater than the update interval)
@@ -163,28 +224,37 @@ if (-not $debug -and `
 $__profile_timing["pwsh_update_check_end"] = [datetime]::Now
 
 function Clear-Cache {
-    # add clear cache logic here
-    Write-Host "Clearing cache..." -ForegroundColor Cyan
+    # If function "Clear-Cache_Override" is defined in profile.ps1 file
+    # then call it instead.
+    # -----------------------------------------------------------------
+    # If you do override this function, you should should probably duplicate
+    # the following calls in your override function, just don't call this
+    # function from your override function, otherwise you'll be in an infinate loop.
+    if (Get-Command -Name "Clear-Cache_Override" -ErrorAction SilentlyContinue) {
+        Clear-Cache_Override
+    } else {
+        # add clear cache logic here
+        Write-Host "Clearing cache..." -ForegroundColor Cyan
 
-    # Clear Windows Prefetch
-    Write-Host "Clearing Windows Prefetch..." -ForegroundColor Yellow
-    Remove-Item -Path "$env:SystemRoot\Prefetch\*" -Force -ErrorAction SilentlyContinue
+        # Clear Windows Prefetch
+        Write-Host "Clearing Windows Prefetch..." -ForegroundColor Yellow
+        Remove-Item -Path "$env:SystemRoot\Prefetch\*" -Force -ErrorAction SilentlyContinue
 
-    # Clear Windows Temp
-    Write-Host "Clearing Windows Temp..." -ForegroundColor Yellow
-    Remove-Item -Path "$env:SystemRoot\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
+        # Clear Windows Temp
+        Write-Host "Clearing Windows Temp..." -ForegroundColor Yellow
+        Remove-Item -Path "$env:SystemRoot\Temp\*" -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Clear User Temp
-    Write-Host "Clearing User Temp..." -ForegroundColor Yellow
-    Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
+        # Clear User Temp
+        Write-Host "Clearing User Temp..." -ForegroundColor Yellow
+        Remove-Item -Path "$env:TEMP\*" -Recurse -Force -ErrorAction SilentlyContinue
 
-    # Clear Internet Explorer Cache
-    Write-Host "Clearing Internet Explorer Cache..." -ForegroundColor Yellow
-    Remove-Item -Path "$env:LOCALAPPDATA\Microsoft\Windows\INetCache\*" -Recurse -Force -ErrorAction SilentlyContinue
+        # Clear Internet Explorer Cache
+        Write-Host "Clearing Internet Explorer Cache..." -ForegroundColor Yellow
+        Remove-Item -Path "$env:LOCALAPPDATA\Microsoft\Windows\INetCache\*" -Recurse -Force -ErrorAction SilentlyContinue
 
-    Write-Host "Cache clearing completed." -ForegroundColor Green
+        Write-Host "Cache clearing completed." -ForegroundColor Green
+    }
 }
-
 
 # Admin Check and Prompt Customization
 $__profile_timing["admin_check_start"] = [datetime]::Now
@@ -203,21 +273,23 @@ function Test-CommandExists {
     return $exists
 }
 
-
 # Editor Configuration
 $__profile_timing["editor_config_start"] = [datetime]::Now
-$EDITOR = if (Test-CommandExists nvim) { 'nvim' }
+if ($EDITOR_Override){
+    $EDITOR = $EDITOR_Override
+} else {
+    $EDITOR = if (Test-CommandExists nvim) { 'nvim' }
           elseif (Test-CommandExists pvim) { 'pvim' }
           elseif (Test-CommandExists vim) { 'vim' }
           elseif (Test-CommandExists vi) { 'vi' }
           elseif (Test-CommandExists code) { 'code' }
+          elseif (Test-CommandExists codium) { 'codium' }
           elseif (Test-CommandExists notepad++) { 'notepad++' }
           elseif (Test-CommandExists sublime_text) { 'sublime_text' }
           else { 'notepad' }
-Set-Alias -Name vim -Value $EDITOR
+    Set-Alias -Name vim -Value $EDITOR
+}
 $__profile_timing["editor_config_end"] = [datetime]::Now
-
-
 # Quick Access to Editing the Profile
 $__profile_timing["edit_profile_func_start"] = [datetime]::Now
 function Edit-Profile {
@@ -241,9 +313,15 @@ function winutil {
     irm https://christitus.com/win | iex
 }
 
-# Open WinUtil pre-release
+# Open WinUtil dev-release
 function winutildev {
-    irm https://christitus.com/windev | iex
+	# If function "WinUtilDev_Override" is defined in profile.ps1 file
+    # then call it instead.
+    if (Get-Command -Name "WinUtilDev_Override" -ErrorAction SilentlyContinue) {
+        WinUtilDev_Override
+    } else {
+        irm https://christitus.com/windev | iex
+    }
 }
 
 # System Utilities
@@ -264,7 +342,7 @@ function uptime {
         # find date/time format
         $dateFormat = [System.Globalization.CultureInfo]::CurrentCulture.DateTimeFormat.ShortDatePattern
         $timeFormat = [System.Globalization.CultureInfo]::CurrentCulture.DateTimeFormat.LongTimePattern
-        
+		
         # check powershell version
         if ($PSVersionTable.PSVersion.Major -eq 5) {
             $lastBoot = (Get-WmiObject win32_operatingsystem).LastBootUpTime
@@ -273,7 +351,8 @@ function uptime {
             # reformat lastBoot
             $lastBoot = $bootTime.ToString("$dateFormat $timeFormat")
         } else {
-            $lastBoot = net statistics workstation | Select-String "since" | ForEach-Object { $_.ToString().Replace('Statistics since ', '') }
+            # the Get-Uptime cmdlet was introduced in PowerShell 6.0
+            $lastBoot = (Get-Uptime -Since).ToString("$dateFormat $timeFormat")			
             $bootTime = [System.DateTime]::ParseExact($lastBoot, "$dateFormat $timeFormat", [System.Globalization.CultureInfo]::InvariantCulture)
         }
 
@@ -327,7 +406,7 @@ function hb {
         $response = Invoke-RestMethod -Uri $uri -Method Post -Body $Content -ErrorAction Stop
         $hasteKey = $response.key
         $url = "http://bin.christitus.com/$hasteKey"
-        Set-Clipboard $url
+	    Set-Clipboard $url
         Write-Output "$url copied to clipboard."
     } catch {
         Write-Error "Failed to upload the document. Error: $_"
@@ -418,8 +497,13 @@ function docs {
 }
     
 function dtop { 
-    $dtop = if ([Environment]::GetFolderPath("Desktop")) {[Environment]::GetFolderPath("Desktop")} else {$HOME + "\Documents"}
+    $dtop = if ([Environment]::GetFolderPath("Desktop")) {[Environment]::GetFolderPath("Desktop")} else {$HOME + "\Desktop"}
     Set-Location -Path $dtop
+}
+
+function dload {
+    $downloads = if ([Environment]::GetFolderPath("Downloads")) {[Environment]::GetFolderPath("Downloads")} else {$HOME + "\Downloads"}
+    Set-Location -Path $downloads
 }
 
 # Simplified Process Management
@@ -434,7 +518,7 @@ function gs { git status }
 
 function ga { git add . }
 
-function gc { param($m) git commit -m "$m" }
+function gcom { param($m) git commit -m "$m" }
 
 function gpush { git push }
 
@@ -444,10 +528,6 @@ function g { __zoxide_z github }
 
 function gcl { git clone "$args" }
 
-function gcom {
-    git add .
-    git commit -m "$args"
-}
 function lazyg {
     git add .
     git commit -m "$args"
@@ -459,8 +539,8 @@ function sysinfo { Get-ComputerInfo }
 
 # Networking Utilities
 function flushdns {
-    Clear-DnsClientCache
-    Write-Host "DNS has been flushed"
+	Clear-DnsClientCache
+	Write-Host "DNS has been flushed"
 }
 
 # Clipboard Utilities
@@ -469,7 +549,6 @@ function cpy { Set-Clipboard $args[0] }
 function pst { Get-Clipboard }
 
 # Enhanced PowerShell Experience
-
 # Enhanced PSReadLine Configuration
 $__profile_timing["psreadline_start"] = [datetime]::Now
 $PSReadLineOptions = @{
@@ -514,9 +593,18 @@ Set-PSReadLineOption -AddToHistoryHandler {
     return ($null -eq $hasSensitive)
 }
 
-# Improved prediction settings
-Set-PSReadLineOption -PredictionSource HistoryAndPlugin
-Set-PSReadLineOption -MaximumHistoryCount 10000
+function Set-PredictionSource {
+    # If function "Set-PredictionSource_Override" is defined in profile.ps1 file
+    # then call it instead.
+    if (Get-Command -Name "Set-PredictionSource_Override" -ErrorAction SilentlyContinue) {
+        Set-PredictionSource_Override;
+    } else {
+	# Improved prediction settings
+	Set-PSReadLineOption -PredictionSource HistoryAndPlugin
+	Set-PSReadLineOption -MaximumHistoryCount 10000
+    }
+}
+Set-PredictionSource
 $__profile_timing["psreadline_end"] = [datetime]::Now
 
 # Custom completion for common commands
@@ -546,121 +634,92 @@ $scriptblock = {
 }
 Register-ArgumentCompleter -Native -CommandName dotnet -ScriptBlock $scriptblock
 
-
-# oh-my-posh and zoxide init
-$__profile_timing["posh_zoxide_start"] = [datetime]::Now
-# $ompTheme = "https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/negligible.omp.json"
-$ompTheme = "C:\Program Files (x86)\oh-my-posh\themes\negligible.omp.json"
-if ($ompTheme -like 'https://*githubusercontent.com/*') {
-    if (-not (Test-GitHubConnection)) {
-        Write-Error "Cannot connect to github.com. Skipping oh-my-posh theme load."
-    } else {
-        oh-my-posh init pwsh --config $ompTheme | Invoke-Expression
-    }
+$__profile_timing["oh_my_posh_start"] = [datetime]::Now
+if (Get-Command -Name "Get-Theme_Override" -ErrorAction SilentlyContinue){
+    Get-Theme_Override;
 } else {
-    oh-my-posh init pwsh --config $ompTheme | Invoke-Expression
+    oh-my-posh init pwsh --config https://raw.githubusercontent.com/JanDeDobbeleer/oh-my-posh/main/themes/cobalt2.omp.json | Invoke-Expression
 }
+$__profile_timing["oh_my_posh_end"] = [datetime]::Now
+
+$__profile_timing["zoxide_start"] = [datetime]::Now
 if (Get-Command zoxide -ErrorAction SilentlyContinue) {
-    Invoke-Expression (& { (zoxide init --cmd cd powershell | Out-String) })
+    Invoke-Expression (& { (zoxide init --cmd z powershell | Out-String) })
 } else {
     Write-Host "zoxide command not found. Attempting to install via winget..."
     try {
         winget install -e --id ajeetdsouza.zoxide
         Write-Host "zoxide installed successfully. Initializing..."
-        Invoke-Expression (& { (zoxide init powershell | Out-String) })
+        Invoke-Expression (& { (zoxide init --cmd z powershell | Out-String) })
     } catch {
         Write-Error "Failed to install zoxide. Error: $_"
     }
 }
-$__profile_timing["posh_zoxide_end"] = [datetime]::Now
+$__profile_timing["zoxide_end"] = [datetime]::Now
 
 # Help Function
 function Show-Help {
     $helpText = @"
 $($PSStyle.Foreground.Cyan)PowerShell Profile Help$($PSStyle.Reset)
 $($PSStyle.Foreground.Yellow)=======================$($PSStyle.Reset)
-
 $($PSStyle.Foreground.Green)Update-Profile$($PSStyle.Reset) - Checks for profile updates from a remote repository and updates if necessary.
-
 $($PSStyle.Foreground.Green)Update-PowerShell$($PSStyle.Reset) - Checks for the latest PowerShell release and updates if a new version is available.
-
 $($PSStyle.Foreground.Green)Edit-Profile$($PSStyle.Reset) - Opens the current user's profile for editing using the configured editor.
 
-$($PSStyle.Foreground.Green)touch$($PSStyle.Reset) <file> - Creates a new empty file.
-
-$($PSStyle.Foreground.Green)ff$($PSStyle.Reset) <name> - Finds files recursively with the specified name.
-
-$($PSStyle.Foreground.Green)Get-PubIP$($PSStyle.Reset) - Retrieves the public IP address of the machine.
-
-$($PSStyle.Foreground.Green)winutil$($PSStyle.Reset) - Runs the latest WinUtil full-release script from Chris Titus Tech.
-
-$($PSStyle.Foreground.Green)winutildev$($PSStyle.Reset) - Runs the latest WinUtil pre-release script from Chris Titus Tech.
-
-$($PSStyle.Foreground.Green)uptime$($PSStyle.Reset) - Displays the system uptime.
-
-$($PSStyle.Foreground.Green)reload-profile$($PSStyle.Reset) - Reloads the current user's PowerShell profile.
-
-$($PSStyle.Foreground.Green)unzip$($PSStyle.Reset) <file> - Extracts a zip file to the current directory.
-
-$($PSStyle.Foreground.Green)hb$($PSStyle.Reset) <file> - Uploads the specified file's content to a hastebin-like service and returns the URL.
-
-$($PSStyle.Foreground.Green)grep$($PSStyle.Reset) <regex> [dir] - Searches for a regex pattern in files within the specified directory or from the pipeline input.
-
-$($PSStyle.Foreground.Green)df$($PSStyle.Reset) - Displays information about volumes.
-
-$($PSStyle.Foreground.Green)sed$($PSStyle.Reset) <file> <find> <replace> - Replaces text in a file.
-
-$($PSStyle.Foreground.Green)which$($PSStyle.Reset) <name> - Shows the path of the command.
-
-$($PSStyle.Foreground.Green)export$($PSStyle.Reset) <name> <value> - Sets an environment variable.
-
-$($PSStyle.Foreground.Green)pkill$($PSStyle.Reset) <name> - Kills processes by name.
-
-$($PSStyle.Foreground.Green)pgrep$($PSStyle.Reset) <name> - Lists processes by name.
-
-$($PSStyle.Foreground.Green)head$($PSStyle.Reset) <path> [n] - Displays the first n lines of a file (default 10).
-
-$($PSStyle.Foreground.Green)tail$($PSStyle.Reset) <path> [n] - Displays the last n lines of a file (default 10).
-
-$($PSStyle.Foreground.Green)nf$($PSStyle.Reset) <name> - Creates a new file with the specified name.
-
-$($PSStyle.Foreground.Green)mkcd$($PSStyle.Reset) <dir> - Creates and changes to a new directory.
-
-$($PSStyle.Foreground.Green)docs$($PSStyle.Reset) - Changes the current directory to the user's Documents folder.
-
-$($PSStyle.Foreground.Green)dtop$($PSStyle.Reset) - Changes the current directory to the user's Desktop folder.
-
-$($PSStyle.Foreground.Green)ep$($PSStyle.Reset) - Opens the profile for editing.
-
-$($PSStyle.Foreground.Green)k9$($PSStyle.Reset) <name> - Kills a process by name.
-
-$($PSStyle.Foreground.Green)la$($PSStyle.Reset) - Lists all files in the current directory with detailed formatting.
-
-$($PSStyle.Foreground.Green)ll$($PSStyle.Reset) - Lists all files, including hidden, in the current directory with detailed formatting.
-
-$($PSStyle.Foreground.Green)gs$($PSStyle.Reset) - Shortcut for 'git status'.
-
-$($PSStyle.Foreground.Green)ga$($PSStyle.Reset) - Shortcut for 'git add .'.
-
-$($PSStyle.Foreground.Green)gc$($PSStyle.Reset) <message> - Shortcut for 'git commit -m'.
-
-$($PSStyle.Foreground.Green)gpush$($PSStyle.Reset) - Shortcut for 'git push'.
-
-$($PSStyle.Foreground.Green)gpull$($PSStyle.Reset) - Shortcut for 'git pull'.
-
+$($PSStyle.Foreground.Cyan)Git Shortcuts$($PSStyle.Reset)
+$($PSStyle.Foreground.Yellow)=======================$($PSStyle.Reset)
 $($PSStyle.Foreground.Green)g$($PSStyle.Reset) - Changes to the GitHub directory.
-
-$($PSStyle.Foreground.Green)gcom$($PSStyle.Reset) <message> - Adds all changes and commits with the specified message.
-
+$($PSStyle.Foreground.Green)gs$($PSStyle.Reset) - Shortcut for 'git status'.
+$($PSStyle.Foreground.Green)ga$($PSStyle.Reset) - Shortcut for 'git add .'.
+$($PSStyle.Foreground.Green)gcom$($PSStyle.Reset) <message> - Shortcut for 'git commit -m' with the specified message.
+$($PSStyle.Foreground.Green)gpush$($PSStyle.Reset) - Shortcut for 'git push'.
+$($PSStyle.Foreground.Green)gpull$($PSStyle.Reset) - Shortcut for 'git pull'.
 $($PSStyle.Foreground.Green)lazyg$($PSStyle.Reset) <message> - Adds all changes, commits with the specified message, and pushes to the remote repository.
+$($PSStyle.Foreground.Green)gcl$($PSStyle.Reset) <repo_url> - Shortcut for 'git clone <repo_url>'.
 
-$($PSStyle.Foreground.Green)sysinfo$($PSStyle.Reset) - Displays detailed system information.
-
+$($PSStyle.Foreground.Cyan)Shortcuts$($PSStyle.Reset)
+$($PSStyle.Foreground.Yellow)=======================$($PSStyle.Reset)
+$($PSStyle.Foreground.Green)df$($PSStyle.Reset) - Displays information about volumes.
+$($PSStyle.Foreground.Green)docs$($PSStyle.Reset) - Changes the current directory to the user's Documents folder.
+$($PSStyle.Foreground.Green)dtop$($PSStyle.Reset) - Changes the current directory to the user's Desktop folder.
+$($PSStyle.Foreground.Green)dload$($PSStyle.Reset) - Changes the current directory to the user's Downloads folder.
+$($PSStyle.Foreground.Green)ep$($PSStyle.Reset) - Opens the profile for editing.
+$($PSStyle.Foreground.Green)export$($PSStyle.Reset) <name> <value> - Sets an environment variable.
+$($PSStyle.Foreground.Green)ff$($PSStyle.Reset) <name> - Finds files recursively with the specified name.
 $($PSStyle.Foreground.Green)flushdns$($PSStyle.Reset) - Clears the DNS cache.
-
+$($PSStyle.Foreground.Green)Get-PubIP$($PSStyle.Reset) - Retrieves the public IP address of the machine.
+$($PSStyle.Foreground.Green)grep$($PSStyle.Reset) <regex> [dir] - Searches for a regex pattern in files within the specified directory or from the pipeline input.
+$($PSStyle.Foreground.Green)hb$($PSStyle.Reset) <file> - Uploads the specified file's content to a hastebin-like service and returns the URL.
+$($PSStyle.Foreground.Green)head$($PSStyle.Reset) <path> [n] - Displays the first n lines of a file (default 10).
+$($PSStyle.Foreground.Green)k9$($PSStyle.Reset) <name> - Kills a process by name.
+$($PSStyle.Foreground.Green)la$($PSStyle.Reset) - Lists all files in the current directory with detailed formatting.
+$($PSStyle.Foreground.Green)ll$($PSStyle.Reset) - Lists all files, including hidden, in the current directory with detailed formatting.
+$($PSStyle.Foreground.Green)mkcd$($PSStyle.Reset) <dir> - Creates and changes to a new directory.
+$($PSStyle.Foreground.Green)nf$($PSStyle.Reset) <name> - Creates a new file with the specified name.
+$($PSStyle.Foreground.Green)pgrep$($PSStyle.Reset) <name> - Lists processes by name.
+$($PSStyle.Foreground.Green)pkill$($PSStyle.Reset) <name> - Kills processes by name.
+$($PSStyle.Foreground.Green)sysinfo$($PSStyle.Reset) - Displays detailed system information.
+$($PSStyle.Foreground.Green)flushdns$($PSStyle.Reset) - Clears the DNS cache.
 $($PSStyle.Foreground.Green)cpy$($PSStyle.Reset) <text> - Copies the specified text to the clipboard.
-
 $($PSStyle.Foreground.Green)pst$($PSStyle.Reset) - Retrieves text from the clipboard.
+$($PSStyle.Foreground.Green)reload-profile$($PSStyle.Reset) - Reloads the current user's PowerShell profile.
+$($PSStyle.Foreground.Green)sed$($PSStyle.Reset) <file> <find> <replace> - Replaces text in a file.
+$($PSStyle.Foreground.Green)sysinfo$($PSStyle.Reset) - Displays detailed system information.
+$($PSStyle.Foreground.Green)tail$($PSStyle.Reset) <path> [n] - Displays the last n lines of a file (default 10).
+$($PSStyle.Foreground.Green)touch$($PSStyle.Reset) <file> - Creates a new empty file.
+$($PSStyle.Foreground.Green)unzip$($PSStyle.Reset) <file> - Extracts a zip file to the current directory.
+$($PSStyle.Foreground.Green)uptime$($PSStyle.Reset) - Displays the system uptime.
+$($PSStyle.Foreground.Green)which$($PSStyle.Reset) <name> - Shows the path of the command.
+$($PSStyle.Foreground.Green)trash$($PSStyle.Reset) <path> - Move file/folder to Recycle Bin.
+$($PSStyle.Foreground.Green)winutil$($PSStyle.Reset) - Runs the latest WinUtil full-release script from Chris Titus Tech.
+$($PSStyle.Foreground.Green)winutildev$($PSStyle.Reset) - Runs the latest WinUtil pre-release script from Chris Titus Tech.
+$($PSStyle.Foreground.Yellow)=======================$($PSStyle.Reset)
+
+$($PSStyle.Foreground.Cyan)Admin Shortcuts$($PSStyle.Reset)
+$($PSStyle.Foreground.Yellow)=======================$($PSStyle.Reset)
+$($PSStyle.Foreground.Green)admin$($PSStyle.Reset) <cmd> - Open admin shell or run command as admin.
+$($PSStyle.Foreground.Green)su$($PSStyle.Reset) <cmd> - Alias for admin.
+$($PSStyle.Foreground.Yellow)=======================$($PSStyle.Reset)
 
 Use '$($PSStyle.Foreground.Magenta)Show-Help$($PSStyle.Reset)' to display this help message.
 "@
@@ -682,6 +741,7 @@ function Show-ProfileTiming {
         $timing = $__profile_timing
         $sections = @(
             @{Name="Telemetry Opt-Out"; Start="telemetry_start"; End="telemetry_end"},
+            @{Name="GitHub Check"; Start="github_check_start"; End="github_check_end"},
             @{Name="Module Import"; Start="module_import_start"; End="module_import_end"},
             @{Name="Profile Update Check"; Start="profile_update_check_start"; End="profile_update_check_end"},
             @{Name="PowerShell Update Check"; Start="pwsh_update_check_start"; End="pwsh_update_check_end"},
@@ -689,13 +749,10 @@ function Show-ProfileTiming {
             @{Name="Editor Config"; Start="editor_config_start"; End="editor_config_end"},
             @{Name="Edit-Profile Func"; Start="edit_profile_func_start"; End="edit_profile_func_end"},
             @{Name="PSReadLine Config"; Start="psreadline_start"; End="psreadline_end"},
-            @{Name="oh-my-posh & zoxide"; Start="posh_zoxide_start"; End="posh_zoxide_end"},
+            @{Name="oh-my-posh"; Start="oh_my_posh_start"; End="oh_my_posh_end"},
+            @{Name="zoxide"; Start="zoxide_start"; End="zoxide_end"},
             @{Name="Custom Script"; Start="custom_script_start"; End="custom_script_end"}
         )
-        # Only show GitHub Ping if present in timing
-        if ($timing.ContainsKey("github_ping_start") -and $timing.ContainsKey("github_ping_end")) {
-            $sections = @(@{Name="GitHub Ping"; Start="github_ping_start"; End="github_ping_end"}) + $sections
-        }
         Write-Host "`n$($PSStyle.Foreground.Cyan)Profile Startup Timing (ms per section):$($PSStyle.Reset)"
         $last = $timing["start"]
         foreach ($section in $sections) {
